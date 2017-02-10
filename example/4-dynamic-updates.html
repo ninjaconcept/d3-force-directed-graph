@@ -50,6 +50,18 @@ var svg = d3.select("svg")
 var width = window.innerWidth
 var height = window.innerHeight
 
+var selectedId = undefined
+var linkElements, nodeElements, textElements
+
+var linkGroup = svg.append("g")
+  .attr("class", "links")
+
+  var nodeGroup = svg.append("g")
+    .attr("class", "nodes")
+
+var textGroup = svg.append("g")
+  .attr("class", "texts")
+
 svg.attr('width', width).attr('height', height)
 
 var simulation = d3.forceSimulation()
@@ -57,6 +69,8 @@ var simulation = d3.forceSimulation()
   .force("charge", d3.forceManyBody().strength(-120))
     // centers the graph within the svg element
   .force("center", d3.forceCenter(width / 2, height / 2))
+  .velocityDecay(0.6)
+  .alphaTarget(0.7)
 
 var dragDrop = d3.drag()
       .on('start', node => {
@@ -76,77 +90,148 @@ var dragDrop = d3.drag()
         node.fy = null
       })
 
-      var selectNode = function(selectNode) {
+function selectNode(selectNode) {
+  if (selectedId === selectNode.id) {
+    selectedId = undefined
+    resetData()
+    updateSimulation()
+  } else {
+    selectedId = selectNode.id
+    updateData(selectNode)
+    updateSimulation()
+  }
 
-        const neighbors = links.reduce((neighbors, link) => {
-          if (link.target.id === selectNode.id) {
-            neighbors.push(link.source.id)
+  const neighbors = links.reduce((neighbors, link) => {
+    if (link.target.id === selectedId) {
+      neighbors.push(link.source.id)
 
-          } else if (link.source.id === selectNode.id) {
-            neighbors.push(link.target.id)
-          }
+    } else if (link.source.id === selectedId) {
+      neighbors.push(link.target.id)
+    }
 
-          return neighbors
-        }, [selectNode.id])
+    return neighbors
+  }, [selectedId])
 
-        nodeElements.attr("fill", function(node) { return neighbors.indexOf(node.id) > -1 ? (node.level === 1 ? 'blue' : 'green') : (node.level === 1 ? 'red' : 'gray' )})
-        textElements.attr('fill', function(node) { return neighbors.indexOf(node.id) > -1 ? 'green' : 'black'})
+  nodeElements.attr("fill", function(node) { return neighbors.indexOf(node.id) > -1 ? (node.level === 1 ? 'blue' : 'green') : (node.level === 1 ? 'red' : 'gray' )})
+  textElements.attr('fill', function(node) { return neighbors.indexOf(node.id) > -1 ? 'green' : 'black'})
 
-        linkElements.attr('stroke', function (link) { return link.target.id === selectNode.id || link.source.id === selectNode.id ? 'green' : "#E5E5E5"})
-      }
-
-var linkElements = svg.append("g")
-  .attr("class", "links")
-  .selectAll("line")
-  .data(links)
-  .enter().append("line")
-    .attr("stroke-width", 1)
-	  .attr("stroke", "rgba(50, 50, 50, 0.2)")
-
-var nodeElements = svg.append("g")
-  .attr("class", "nodes")
-  .selectAll("circle")
-  .data(nodes)
-  .enter().append("circle")
-    .attr("r", 10)
-    .attr("fill", function (node) { return node.level === 1 ? 'red' : 'gray' })
-    .call(dragDrop)
-    .on('click', selectNode )
-
-var textElements = svg.append("g")
-  .attr("class", "texts")
-  .selectAll("text")
-  .data(nodes)
-  .enter().append("text")
-    .text(function (node) { return  node.label })
-	.attr("font-size", 15)
-	.attr("dx", 15)
-    .attr("dy", 4)
+  linkElements.attr('stroke', function (link) { return link.target.id === selectedId || link.source.id === selectedId ? 'green' : "#E5E5E5"})
+}
 
 
 function updateData(selection) {
+   const neighbors = baseLinks.reduce((neighbors, link) => {
+    if (link.target.id === selection.id) {
+      neighbors.push(link.source.id)
 
+    } else if (link.source.id === selection.id) {
+      neighbors.push(link.target.id)
+    }
+
+    return neighbors
+  }, [selection.id])
+
+  const oldNodes = nodes
+  const newNodes = baseNodes.filter(node => neighbors.indexOf(node.id) > -1)
+
+
+  nodes.filter(node => node.level === 1).forEach(node => {
+    if (newNodes.indexOf(node.id) === -1) {
+      newNodes.push(node)
+    }
+  })
+
+  const removed = nodes.filter(node => newNodes.indexOf(node) === -1)
+  const added = newNodes.filter(node => nodes.indexOf(node) === -1)
+
+  // remove old nodes
+  removed.forEach(node =>  nodes.splice(nodes.indexOf(node), 1))
+
+  // add new nodes
+  added.forEach(node => nodes.push(node))
+
+
+  const nodeIds = newNodes.filter(node => node.level !== 1).map(node => node.id)
+  console.log(nodeIds)
+  links = baseLinks.filter(link => link.target.id === selection.id || link.source.id === selection.id || (nodeIds.indexOf(link.source.id) > -1 && baseNodes.filter(node => node.id === link.target.id)[0].level === 1))
+}
+
+function resetData() {
+  const nodeIds = nodes.map(node => node.id)
+
+  baseNodes.forEach(node => {
+    if (nodeIds.indexOf(node.id) === -1) {
+      nodes.push(node)
+    }
+  })
+
+  links = baseLinks
 }
 
 function updateGraph() {
+      // links
+      linkElements = linkGroup.selectAll('line').data(links, link => link.target.id + link.source.id)
+      linkElements.exit().remove()
 
+      const linkEnter = linkElements
+      .enter().append("line")
+        .attr("stroke-width", 1)
+    	  .attr("stroke", "rgba(50, 50, 50, 0.2)")
+
+        linkElements = linkEnter.merge(linkElements)
+
+      // nodes
+      nodeElements = nodeGroup.selectAll('circle').data(nodes, node => node.id)
+      nodeElements.exit().remove()
+
+      const nodeEnter = nodeElements
+      .enter().append("circle")
+        .attr("r", 10)
+        .attr("fill", function (node) { return node.level === 1 ? 'red' : 'gray' })
+        .call(dragDrop)
+        .on('click', selectNode )
+
+        nodeElements = nodeEnter.merge(nodeElements)
+
+        // texts
+        textElements = textGroup.selectAll('text').data(nodes, node => node.id)
+        textElements.exit().remove()
+
+        const textEnter = textElements
+        .enter().append("text")
+          .text(function (node) { return  node.label })
+      	.attr("font-size", 15)
+      	.attr("dx", 15)
+          .attr("dy", 4)
+
+          textElements = textEnter.merge(textElements)
 }
 
-simulation.nodes(nodes).on('tick', () => {
-  nodeElements
-    .attr("cx", function(node) { return node.x })
-    .attr("cy", function(node) { return node.y })
+function updateSimulation() {
+  updateGraph()
 
-  textElements
-	.attr("x", function(node) { return node.x })
-    .attr("y", function(node) { return node.y })
+  simulation.nodes(nodes).on('tick', () => {
+    nodeElements
+      .attr("cx", function(node) { return node.x })
+      .attr("cy", function(node) { return node.y })
 
-  linkElements
-    .attr("x1", function(link) { return link.source.x })
-    .attr("y1", function(link) { return link.source.y })
-    .attr("x2", function(link) { return link.target.x })
-    .attr("y2", function(link) { return link.target.y })
-})
+    textElements
+  	.attr("x", function(node) { return node.x })
+      .attr("y", function(node) { return node.y })
 
-simulation.force("link").links(links)
+    linkElements
+      .attr("x1", function(link) { return link.source.x })
+      .attr("y1", function(link) { return link.source.y })
+      .attr("x2", function(link) { return link.target.x })
+      .attr("y2", function(link) { return link.target.y })
+  })
+
+  simulation.force("link").links(links)
+
+  simulation.alphaTarget(0.7).restart()
+}
+
+
+updateSimulation()
+
 </script>
